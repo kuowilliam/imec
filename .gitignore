@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local data
+v1.0-mini/
+PhysicalAI_Assignment_v1.pdf
+.DS_Store
+
