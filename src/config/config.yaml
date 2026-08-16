@@ -1,0 +1,8 @@
+image_size: [640, 360]  # [width, height]
+camera_channel: CAM_FRONT
+class_name: pedestrian
+
+radar:
+  channels:
+    - RADAR_FRONT
+  nsweeps: 5
