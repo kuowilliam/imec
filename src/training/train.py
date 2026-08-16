@@ -6,33 +6,13 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import load_config
 from src.data_loader.nuscenes_front_loader import NuScenesFrontLoader, collate_fn
 from src.model.detector import CameraRadarDetector
 from src.model.loss import CenterNetLoss
-
-
-def resolve_path(path):
-    path = Path(path)
-    if path.is_absolute():
-        return path
-    return PROJECT_ROOT / path
-
-
-def select_device(requested_device):
-    if requested_device != "auto":
-        return torch.device(requested_device)
-
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-
-    return torch.device("cpu")
+from src.utils import resolve_path, select_device
 
 
 def move_targets_to_device(targets, device):

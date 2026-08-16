@@ -22,7 +22,7 @@ evaluation:
   dataroot: v1.0-mini
   checkpoint: checkpoints/overfit_best.pt
   split: mini_train
-  num_samples: 16
+  num_samples: 16 # allow to evaluate on a subset of the dataset
   batch_size: 2
   num_workers: 0
   device: auto

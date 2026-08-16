@@ -6,8 +6,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import load_config
 from src.data_loader.nuscenes_front_loader import NuScenesFrontLoader, collate_fn
@@ -15,23 +14,7 @@ from src.evaluation.metrics import PedestrianDetectionMetrics
 from src.evaluation.visualization import save_detection_visualization
 from src.model.detector import CameraRadarDetector
 from src.model.postprocess import CenterNetPostProcessor
-
-
-def resolve_path(path):
-    path = Path(path)
-    if path.is_absolute():
-        return path
-    return PROJECT_ROOT / path
-
-
-def select_device(requested_device):
-    if requested_device != "auto":
-        return torch.device(requested_device)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+from src.utils import resolve_path, select_device
 
 
 def run_evaluation(config=None):
@@ -43,6 +26,7 @@ def run_evaluation(config=None):
     checkpoint_path = resolve_path(evaluation_config["checkpoint"])
     output_directory = resolve_path(evaluation_config["output_dir"])
 
+    # load the validation dataset
     dataset = NuScenesFrontLoader(
         dataroot=resolve_path(evaluation_config["dataroot"]),
         split=evaluation_config["split"],
@@ -53,6 +37,7 @@ def run_evaluation(config=None):
         class_name=config["class_name"],
     )
 
+    # allow to evaluate on a subset of the dataset
     number_of_samples = evaluation_config["num_samples"]
     if number_of_samples is not None:
         number_of_samples = min(number_of_samples, len(dataset))
@@ -102,16 +87,15 @@ def run_evaluation(config=None):
                 radar_padding_mask=batch["radar_padding_mask"].to(device),
             )
             detections = postprocessor(predictions)
-            metrics.update(detections, batch["targets"])
+            metrics.update(detections, batch["targets"]) # compare the predictions with the ground truth
 
-            if evaluation_config["save_visualizations"]:
+            if evaluation_config["save_visualizations"]: # run the visualization if true
                 for sample_index, detection in enumerate(detections):
+                    # stop once the max number is reached
                     if visualized_samples >= evaluation_config["max_visualizations"]:
                         break
 
-                    sample_token = batch["metadata"][sample_index][
-                        "sample_token"
-                    ]
+                    sample_token = batch["metadata"][sample_index]["sample_token"]
                     output_path = (
                         output_directory
                         / "visualizations"
@@ -127,7 +111,6 @@ def run_evaluation(config=None):
                         ],
                     )
                     visualized_samples += 1
-
             print(f"Evaluated batch {batch_index}/{len(dataloader)}")
 
     results = metrics.compute()

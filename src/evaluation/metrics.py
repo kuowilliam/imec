@@ -1,44 +1,10 @@
 import torch
-
-
-def box_iou(boxes1, boxes2):
-    """Calculate pairwise IoU for two sets of xyxy image-space boxes."""
-    if boxes1.numel() == 0 or boxes2.numel() == 0:
-        return torch.zeros(
-            boxes1.shape[0],
-            boxes2.shape[0],
-            dtype=torch.float32,
-        )
-
-    boxes1 = boxes1.to(dtype=torch.float32)
-    boxes2 = boxes2.to(dtype=torch.float32)
-
-    top_left = torch.maximum(
-        boxes1[:, None, :2],
-        boxes2[None, :, :2],
-    )
-    bottom_right = torch.minimum(
-        boxes1[:, None, 2:],
-        boxes2[None, :, 2:],
-    )
-    intersection_size = (bottom_right - top_left).clamp(min=0.0)
-    intersection = intersection_size[..., 0] * intersection_size[..., 1]
-
-    area1_size = (boxes1[:, 2:] - boxes1[:, :2]).clamp(min=0.0)
-    area2_size = (boxes2[:, 2:] - boxes2[:, :2]).clamp(min=0.0)
-    area1 = area1_size[:, 0] * area1_size[:, 1]
-    area2 = area2_size[:, 0] * area2_size[:, 1]
-
-    union = area1[:, None] + area2[None, :] - intersection
-    return torch.where(
-        union > 0.0,
-        intersection / union,
-        torch.zeros_like(intersection),
-    )
+from torchmetrics.detection import MeanAveragePrecision
+from torchvision.ops import box_iou
 
 
 class PedestrianDetectionMetrics:
-    """Accumulate single-class 2D detections and calculate IoU-based AP."""
+    """Accumulate single-class 2D pedestrian detection metrics."""
 
     def __init__(
         self,
@@ -66,27 +32,47 @@ class PedestrianDetectionMetrics:
         self.reset()
 
     def reset(self):
+        self.metric = MeanAveragePrecision(
+            box_format="xyxy",
+            iou_type="bbox",
+            iou_thresholds=self.iou_thresholds,
+            extended_summary=True,
+        )
         self.detections = []
         self.targets = []
+
+    @staticmethod
+    def _prepare_detection(detection):
+        boxes = detection["boxes"].detach().cpu().float()
+        scores = detection["scores"].detach().cpu().float()
+        return {
+            "boxes": boxes,
+            "scores": scores,
+            "labels": torch.zeros(len(boxes), dtype=torch.int64),
+        }
+
+    @staticmethod
+    def _prepare_target(target):
+        boxes = target["boxes"].detach().cpu().float()
+        return {
+            "boxes": boxes,
+            "labels": torch.zeros(len(boxes), dtype=torch.int64),
+        }
 
     def update(self, detections, targets):
         if len(detections) != len(targets):
             raise ValueError("detections and targets must have the same batch size.")
 
-        for detection, target in zip(detections, targets):
-            self.detections.append(
-                {
-                    "boxes": detection["boxes"].detach().cpu().float(),
-                    "scores": detection["scores"].detach().cpu().float(),
-                }
-            )
-            self.targets.append(
-                {
-                    "boxes": target["boxes"].detach().cpu().float(),
-                }
-            )
+        prepared_detections = [
+            self._prepare_detection(detection) for detection in detections
+        ]
+        prepared_targets = [self._prepare_target(target) for target in targets]
 
-    def _match_predictions(self, iou_threshold):
+        self.metric.update(prepared_detections, prepared_targets)
+        self.detections.extend(prepared_detections)
+        self.targets.extend(prepared_targets)
+
+    def _match_predictions(self):
         all_scores = []
         all_true_positives = []
         number_of_ground_truths = 0
@@ -95,23 +81,20 @@ class PedestrianDetectionMetrics:
             predicted_boxes = detection["boxes"]
             predicted_scores = detection["scores"]
             ground_truth_boxes = target["boxes"]
-            number_of_ground_truths += ground_truth_boxes.shape[0]
+            number_of_ground_truths += len(ground_truth_boxes)
 
             order = torch.argsort(predicted_scores, descending=True)
             predicted_boxes = predicted_boxes[order]
             predicted_scores = predicted_scores[order]
             matched_ground_truths = torch.zeros(
-                ground_truth_boxes.shape[0],
+                len(ground_truth_boxes),
                 dtype=torch.bool,
             )
 
-            for predicted_box, score in zip(
-                predicted_boxes,
-                predicted_scores,
-            ):
+            for predicted_box, score in zip(predicted_boxes, predicted_scores):
                 is_true_positive = False
 
-                if ground_truth_boxes.shape[0] > 0:
+                if len(ground_truth_boxes) > 0:
                     overlaps = box_iou(
                         predicted_box.unsqueeze(0),
                         ground_truth_boxes,
@@ -119,80 +102,50 @@ class PedestrianDetectionMetrics:
                     overlaps[matched_ground_truths] = -1.0
                     best_overlap, best_index = overlaps.max(dim=0)
 
-                    if float(best_overlap) >= iou_threshold:
+                    if float(best_overlap) >= self.report_iou_threshold:
                         matched_ground_truths[best_index] = True
                         is_true_positive = True
 
                 all_scores.append(score)
                 all_true_positives.append(is_true_positive)
 
-        if all_scores:
-            scores = torch.stack(all_scores)
-            true_positives = torch.tensor(
-                all_true_positives,
-                dtype=torch.bool,
+        if not all_scores:
+            return (
+                torch.empty(0, dtype=torch.float32),
+                torch.empty(0, dtype=torch.bool),
+                number_of_ground_truths,
             )
-            order = torch.argsort(scores, descending=True)
-            scores = scores[order]
-            true_positives = true_positives[order]
-        else:
-            scores = torch.empty(0, dtype=torch.float32)
-            true_positives = torch.empty(0, dtype=torch.bool)
 
-        return scores, true_positives, number_of_ground_truths
+        scores = torch.stack(all_scores)
+        true_positives = torch.tensor(all_true_positives, dtype=torch.bool)
+        order = torch.argsort(scores, descending=True)
+        return scores[order], true_positives[order], number_of_ground_truths
+
+    def _ap_by_iou(self, metric_results):
+        precision = metric_results["precision"]
+        ap_by_iou = {}
+
+        for index, threshold in enumerate(self.iou_thresholds):
+            values = precision[index, :, :, 0, -1]
+            valid_values = values[values >= 0]
+            ap_by_iou[f"{threshold:.2f}"] = (
+                float(valid_values.mean()) if valid_values.numel() else 0.0
+            )
+
+        return ap_by_iou
 
     @staticmethod
-    def _calculate_ap(true_positives, number_of_ground_truths):
-        if number_of_ground_truths == 0 or true_positives.numel() == 0:
-            return 0.0
-
-        true_positive_count = true_positives.to(torch.float32).cumsum(0)
-        false_positive_count = (~true_positives).to(torch.float32).cumsum(0)
-        recall = true_positive_count / number_of_ground_truths
-        precision = true_positive_count / (
-            true_positive_count + false_positive_count
-        ).clamp(min=1.0)
-
-        interpolated_precisions = []
-        for recall_level in torch.linspace(0.0, 1.0, 101):
-            valid = recall >= recall_level
-            if valid.any():
-                interpolated_precisions.append(precision[valid].max())
-            else:
-                interpolated_precisions.append(torch.tensor(0.0))
-
-        return float(torch.stack(interpolated_precisions).mean())
+    def _to_float(metric_results, key):
+        return float(metric_results[key].detach().cpu())
 
     def compute(self):
         if not self.targets:
             raise RuntimeError("No samples were added to the metrics accumulator.")
 
-        ap_by_iou = {}
-        matched_results = {}
-
-        for threshold in self.iou_thresholds:
-            scores, true_positives, number_of_ground_truths = (
-                self._match_predictions(threshold)
-            )
-            ap_by_iou[f"{threshold:.2f}"] = self._calculate_ap(
-                true_positives,
-                number_of_ground_truths,
-            )
-            matched_results[round(threshold, 2)] = (
-                scores,
-                true_positives,
-                number_of_ground_truths,
-            )
-
-        report_key = round(self.report_iou_threshold, 2)
-        if report_key not in matched_results:
-            report_result = self._match_predictions(
-                self.report_iou_threshold
-            )
-        else:
-            report_result = matched_results[report_key]
-
-        scores, true_positives, number_of_ground_truths = report_result
+        metric_results = self.metric.compute()
+        scores, true_positives, number_of_ground_truths = (
+            self._match_predictions()
+        )
         report_keep = scores >= self.report_score_threshold
         true_positive_count = int(true_positives[report_keep].sum())
         prediction_count = int(report_keep.sum())
@@ -214,10 +167,16 @@ class PedestrianDetectionMetrics:
         )
 
         return {
-            "ap50": ap_by_iou.get("0.50", 0.0),
-            "ap75": ap_by_iou.get("0.75", 0.0),
-            "map_50_95": sum(ap_by_iou.values()) / len(ap_by_iou),
-            "ap_by_iou": ap_by_iou,
+            "ap50": self._to_float(metric_results, "map_50"),
+            "ap75": self._to_float(metric_results, "map_75"),
+            "map_50_95": self._to_float(metric_results, "map"),
+            "map_small": self._to_float(metric_results, "map_small"),
+            "map_medium": self._to_float(metric_results, "map_medium"),
+            "map_large": self._to_float(metric_results, "map_large"),
+            "mar_1": self._to_float(metric_results, "mar_1"),
+            "mar_10": self._to_float(metric_results, "mar_10"),
+            "mar_100": self._to_float(metric_results, "mar_100"),
+            "ap_by_iou": self._ap_by_iou(metric_results),
             "report_iou_threshold": self.report_iou_threshold,
             "report_score_threshold": self.report_score_threshold,
             "precision": precision,
