@@ -63,12 +63,6 @@ class CameraEncoder(nn.Module):
         return self
 
     def forward(self, images):
-        if images.ndim != 4 or images.shape[1] != 3:
-            raise ValueError(
-                "CameraEncoder expects images with shape [B, 3, H, W], "
-                f"but received {tuple(images.shape)}."
-            )
-
         images = (images - self.image_mean) / self.image_std
 
         if self.frozen:
