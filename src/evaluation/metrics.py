@@ -63,9 +63,8 @@ class PedestrianDetectionMetrics:
         if len(detections) != len(targets):
             raise ValueError("detections and targets must have the same batch size.")
 
-        prepared_detections = [
-            self._prepare_detection(detection) for detection in detections
-        ]
+        # turn into the format expected by the metric
+        prepared_detections = [self._prepare_detection(detection) for detection in detections]
         prepared_targets = [self._prepare_target(target) for target in targets]
 
         self.metric.update(prepared_detections, prepared_targets)
@@ -83,10 +82,10 @@ class PedestrianDetectionMetrics:
             ground_truth_boxes = target["boxes"]
             number_of_ground_truths += len(ground_truth_boxes)
 
-            order = torch.argsort(predicted_scores, descending=True)
+            order = torch.argsort(predicted_scores, descending=True) # sort the boxes by score
             predicted_boxes = predicted_boxes[order]
             predicted_scores = predicted_scores[order]
-            matched_ground_truths = torch.zeros(
+            matched_ground_truths = torch.zeros( # one gt can only be matched once
                 len(ground_truth_boxes),
                 dtype=torch.bool,
             )
@@ -102,6 +101,7 @@ class PedestrianDetectionMetrics:
                     overlaps[matched_ground_truths] = -1.0
                     best_overlap, best_index = overlaps.max(dim=0)
 
+                    # if the best overlap is greater than iou threshold, mark it as a true positive
                     if float(best_overlap) >= self.report_iou_threshold:
                         matched_ground_truths[best_index] = True
                         is_true_positive = True

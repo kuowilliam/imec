@@ -1,5 +1,6 @@
 import random
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -106,10 +107,11 @@ def main():
     )
 
     number_of_samples = train_cfg["num_samples"]
+    if number_of_samples is not None:
+        dataset = Subset(dataset, range(number_of_samples))
 
-    overfit_dataset = Subset(dataset, range(number_of_samples))
     dataloader = DataLoader(
-        overfit_dataset,
+        dataset,
         batch_size=train_cfg["batch_size"],
         shuffle=True,
         num_workers=train_cfg["num_workers"],
@@ -135,7 +137,7 @@ def main():
     )
 
     print(f"Device: {device}")
-    print(f"Overfit samples: {number_of_samples}")
+    print(f"Train samples: {len(dataset)}")
     print(f"Batches per epoch: {len(dataloader)}")
     print(
         "Trainable parameters: "
@@ -143,6 +145,7 @@ def main():
     )
 
     best_loss = float("inf")
+    started_at = time.perf_counter()
 
     for epoch in range(1, train_cfg["epochs"] + 1):
         losses = train_one_epoch(
@@ -172,8 +175,11 @@ def main():
                 config=config,
             )
 
+    elapsed = time.perf_counter() - started_at
+    minutes, seconds = divmod(elapsed, 60)
     print(f"Best total loss: {best_loss:.4f}")
     print(f"Checkpoint: {checkpoint_path}")
+    print(f"Elapsed: {int(minutes)}m {seconds:.1f}s")
 
 
 if __name__ == "__main__":
