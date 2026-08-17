@@ -1,27 +1,20 @@
 """
-Since my goal is 2D front-camera detection, I choose CAM_FRONT as the reference frame.
+Radar helpers in the CAM_FRONT frame.
 
-Processing the radar data from the nuScenes dataset.
-Steps:
-- For a given sample
-↓
-- Select the RADAR_FRONT data closest to this timestamp
-↓
-- Aggregate the nearest 5 radar sweeps
-↓
-- Transform radar points from their original coordinate frame to the CAM_FRONT 3D coordinate frame
-↓
-- Use camera intrinsics to project the 3D radar points onto image pixels (u, v)
-↓
-- Keep only points that actually fall within the CAM_FRONT image frame
-↓
-- Obtain an array with shape [N, 7]
+load_projected_radar:
+aggregate nsweeps, project to the image, return [N, 7]
+(u, v, depth, RCS, vx_comp, vy_comp, time_lag).
+
+build_radar_relevance_targets:
+label each 3D point as pedestrian (1), clutter (0),
+or ignore if it sits in the 10% box margin.
 """
 
 import numpy as np
 from pathlib import Path
 from nuscenes.utils.data_classes import RadarPointCloud
 from nuscenes.utils.geometry_utils import view_points
+from nuscenes.utils.geometry_utils import points_in_box
 
 def load_projected_radar(
     nusc,
@@ -88,3 +81,52 @@ def load_projected_radar(
         return np.empty((0, 7), dtype=np.float32)
 
     return np.concatenate(all_points, axis=0).astype(np.float32)
+
+def build_radar_relevance_targets(
+    camera_xyz,
+    pedestrian_boxes,
+    ignore_margin=0.10,
+):
+    """
+    determine if this radar point is in the pedestrian box
+    - in the box: 1.0
+    - out of the box: 0.0
+    - ignore: True (if the point is at blurry region)
+
+    input: 3D camera points(camera front), pedestrian boxes
+    """
+    camera_xyz = np.asarray(camera_xyz, dtype=np.float32)
+
+    num_points = camera_xyz.shape[0]
+
+    targets = np.zeros(num_points, dtype=np.float32)
+    ignore_mask = np.zeros(num_points, dtype=bool)
+
+    if num_points == 0 or not pedestrian_boxes:
+        return targets, ignore_mask
+
+    # points_in_box expects [3, N]
+    points = camera_xyz.T
+
+    positive = np.zeros(num_points, dtype=bool)
+    expanded = np.zeros(num_points, dtype=bool)
+
+    for box in pedestrian_boxes:
+        positive |= points_in_box(
+            box,
+            points,
+            wlh_factor=1.0,
+        )
+
+        expanded |= points_in_box(
+            box,
+            points,
+            wlh_factor=1.0 + ignore_margin,
+        )
+
+    targets[positive] = 1.0
+
+    # points in the expanded box but not in the original box
+    ignore_mask = expanded & ~positive
+
+    return targets, ignore_mask
