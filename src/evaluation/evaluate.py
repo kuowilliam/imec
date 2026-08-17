@@ -9,7 +9,11 @@ from torch.utils.data import DataLoader, Subset
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import load_config
-from src.data_loader.nuscenes_front_loader import NuScenesFrontLoader, collate_fn
+from src.data_loader.nuscenes_front_loader import (
+    NuScenesFrontLoader,
+    collate_fn,
+    load_scene_names,
+)
 from src.evaluation.metrics import PedestrianDetectionMetrics
 from src.evaluation.visualization import save_detection_visualization
 from src.model.detector import CameraRadarDetector
@@ -26,7 +30,16 @@ def run_evaluation(config=None):
     checkpoint_path = resolve_path(evaluation_config["checkpoint"])
     output_directory = resolve_path(evaluation_config["output_dir"])
 
-    # load the validation dataset
+    # Load the fixed scene-level evaluation split.
+    dataset_config = config.get("dataset", {})
+    manifest_path = dataset_config.get("scene_manifests", {}).get(
+        evaluation_config["split"]
+    )
+    scene_names = (
+        load_scene_names(resolve_path(manifest_path))
+        if manifest_path is not None
+        else None
+    )
     dataset = NuScenesFrontLoader(
         dataroot=resolve_path(evaluation_config["dataroot"]),
         split=evaluation_config["split"],
@@ -35,6 +48,12 @@ def run_evaluation(config=None):
         nsweeps=config["radar"]["nsweeps"],
         camera_channel=config["camera_channel"],
         class_name=config["class_name"],
+        version=dataset_config.get("version", "v1.0-mini"),
+        available_scenes_only=dataset_config.get(
+            "available_scenes_only",
+            False,
+        ),
+        scene_names=scene_names,
     )
 
     # allow to evaluate on a subset of the dataset

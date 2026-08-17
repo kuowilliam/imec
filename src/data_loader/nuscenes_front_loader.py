@@ -19,6 +19,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.config import load_config
 from src.data_loader.radar_loader import load_projected_radar
 
+
+def load_scene_names(path):
+    path = Path(path)
+    scene_names = [
+        line.strip()
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not scene_names:
+        raise ValueError(f"Scene manifest is empty: {path}")
+    if len(scene_names) != len(set(scene_names)):
+        raise ValueError(f"Scene manifest contains duplicates: {path}")
+    return scene_names
+
+
 class NuScenesFrontLoader(Dataset):
     def __init__(
         self,
@@ -30,7 +45,16 @@ class NuScenesFrontLoader(Dataset):
         camera_channel="CAM_FRONT",
         class_name="pedestrian",
         version="v1.0-mini",
+        available_scenes_only=False,
+        augmentation=None,
+        scene_names=None,
+        frame_stride=1,
     ):
+        if isinstance(frame_stride, bool) or not isinstance(frame_stride, int):
+            raise TypeError("frame_stride must be an integer.")
+        if frame_stride < 1:
+            raise ValueError("frame_stride must be at least 1.")
+
         self.dataroot = Path(dataroot)
         self.split = split
         self.image_size = image_size
@@ -38,6 +62,9 @@ class NuScenesFrontLoader(Dataset):
         self.nsweeps = nsweeps
         self.camera_channel = camera_channel
         self.class_name = class_name
+        self.available_scenes_only = available_scenes_only
+        self.augmentation = augmentation
+        self.frame_stride = frame_stride
 
         self.nusc = NuScenes(
             version=version,
@@ -45,18 +72,96 @@ class NuScenesFrontLoader(Dataset):
             verbose=False,
         )
 
-        # split scenes
-        split_scenes = set(create_splits_scenes()[split])
+        # Use an explicit scene-level split when provided. Otherwise, fall
+        # back to the official nuScenes split.
+        split_scenes = (
+            set(scene_names)
+            if scene_names is not None
+            else set(create_splits_scenes()[split])
+        )
         self.scene_name_by_token = { # map scene token to scene name
             scene["token"]: scene["name"]
             for scene in self.nusc.scene
         }
 
-        self.samples = [ # filter samples by split
+        split_samples = [ # filter samples by split
             sample
             for sample in self.nusc.sample
             if self.scene_name_by_token[sample["scene_token"]] in split_scenes
         ]
+
+        if self.available_scenes_only:
+            samples_by_scene = {}
+            for sample in split_samples:
+                samples_by_scene.setdefault(sample["scene_token"], []).append(sample)
+
+            available_scene_tokens = {
+                scene_token
+                for scene_token, scene_samples in samples_by_scene.items()
+                if all(
+                    self._required_sensor_files_exist(sample)
+                    for sample in scene_samples
+                )
+            }
+            split_samples = [
+                sample
+                for sample in split_samples
+                if sample["scene_token"] in available_scene_tokens
+            ]
+
+            if not split_samples:
+                raise FileNotFoundError(
+                    f"No complete {split!r} scenes with the required camera "
+                    f"and radar files were found under {self.dataroot}."
+                )
+
+        if self.frame_stride > 1:
+            samples_by_scene = {}
+            for sample in split_samples:
+                samples_by_scene.setdefault(sample["scene_token"], []).append(sample)
+
+            selected_sample_tokens = {
+                sample["token"]
+                for scene_samples in samples_by_scene.values()
+                for sample in sorted(
+                    scene_samples,
+                    key=lambda item: item["timestamp"],
+                )[::self.frame_stride]
+            }
+            split_samples = [
+                sample
+                for sample in split_samples
+                if sample["token"] in selected_sample_tokens
+            ]
+
+        self.samples = split_samples
+        self.scene_names = sorted({
+            self.scene_name_by_token[sample["scene_token"]]
+            for sample in self.samples
+        })
+
+    def _required_sensor_files_exist(self, sample):
+        camera_record = self.nusc.get(
+            "sample_data",
+            sample["data"][self.camera_channel],
+        )
+        if not (self.dataroot / camera_record["filename"]).is_file():
+            return False
+
+        for radar_channel in self.radar_channels:
+            radar_token = sample["data"][radar_channel]
+
+            for _ in range(self.nsweeps):
+                radar_record = self.nusc.get("sample_data", radar_token)
+                if not (self.dataroot / radar_record["filename"]).is_file():
+                    return False
+
+                previous_token = radar_record["prev"]
+                if not previous_token:
+                    break
+                radar_token = previous_token
+
+        return True
 
     def _get_pedestrian_boxes(self, sample, original_size):
         """
@@ -176,6 +281,12 @@ class NuScenesFrontLoader(Dataset):
         image = image.resize(self.image_size)
 
         image, radar_points, target = self._to_tensor(image, boxes, radar_points)
+        if self.augmentation is not None:
+            image, target["boxes"], radar_points = self.augmentation(
+                image,
+                target["boxes"],
+                radar_points,
+            )
         return {
             "image": image,
             "radar_points": radar_points,

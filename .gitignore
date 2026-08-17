@@ -11,8 +11,10 @@ wheels/
 
 # Local data
 v1.0-mini/
+v1.0-trainval-parts1-2/
 PhysicalAI_Assignment_v1.pdf
 .DS_Store
 tmp/
 checkpoints/
 outputs/
+v1.0-trainval-parts1-2/
