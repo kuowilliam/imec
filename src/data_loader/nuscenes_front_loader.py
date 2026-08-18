@@ -216,22 +216,20 @@ class NuScenesFrontLoader(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def _to_tensor(self, image, boxes, radar_points):
+    def _to_tensor(self, image, boxes, radar_points, radar_relevance_targets, radar_relevance_ignore_mask):
         image = F.to_tensor(image)
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.ones(len(boxes), dtype=torch.int64)
+        radar_points = torch.as_tensor(radar_points, dtype=torch.float32)
 
-        boxes = torch.as_tensor(
-            boxes,
+        # radar relevance targets and ignore mask converted into tensors.
+        radar_relevance_targets = torch.as_tensor(
+            radar_relevance_targets,
             dtype=torch.float32,
         )
-
-        labels = torch.ones(
-            len(boxes),
-            dtype=torch.int64,
-        )
-
-        radar_points = torch.as_tensor(
-            radar_points,
-            dtype=torch.float32,
+        radar_relevance_ignore_mask = torch.as_tensor(
+            radar_relevance_ignore_mask,
+            dtype=torch.bool,
         )
 
         target = {
@@ -239,7 +237,13 @@ class NuScenesFrontLoader(Dataset):
             "labels": labels,
         }
 
-        return image, radar_points, target
+        return (
+            image,
+            radar_points,
+            radar_relevance_targets,
+            radar_relevance_ignore_mask,
+            target,
+        )
 
     def __getitem__(self, idx):
         sample = self.samples[idx]
@@ -264,12 +268,13 @@ class NuScenesFrontLoader(Dataset):
         )
 
         # Radar
-        radar_points = load_projected_radar(
+        radar_points, radar_relevance_targets, radar_relevance_ignore_mask = load_projected_radar(
             nusc=self.nusc,
             sample=sample,
             radar_channels=self.radar_channels,
             camera_channel=self.camera_channel,
             nsweeps=self.nsweeps,
+            class_name=self.class_name,
         )
 
         # Scale radar image coordinates to resized image
@@ -280,7 +285,13 @@ class NuScenesFrontLoader(Dataset):
         # Resize image
         image = image.resize(self.image_size)
 
-        image, radar_points, target = self._to_tensor(image, boxes, radar_points)
+        image, radar_points, radar_relevance_targets, radar_relevance_ignore_mask, target = self._to_tensor(
+            image,
+            boxes,
+            radar_points,
+            radar_relevance_targets,
+            radar_relevance_ignore_mask,
+        )
         if self.augmentation is not None:
             image, target["boxes"], radar_points = self.augmentation(
                 image,
@@ -290,6 +301,8 @@ class NuScenesFrontLoader(Dataset):
         return {
             "image": image,
             "radar_points": radar_points,
+            "radar_relevance_targets": radar_relevance_targets,
+            "radar_relevance_ignore_mask": radar_relevance_ignore_mask,
             "target": target,
             "metadata": {
                 "sample_token": sample["token"],
@@ -323,6 +336,18 @@ def collate_fn(batch):
         dtype=torch.bool,
     )
 
+    radar_relevance_targets = torch.zeros(
+        batch_size,
+        max_points,
+        dtype=torch.float32,
+    )
+
+    radar_relevance_ignore_mask = torch.ones(
+        batch_size,
+        max_points,
+        dtype=torch.bool,
+    )
+
     for i, points in enumerate(radar_list):
         n = points.shape[0]
 
@@ -331,11 +356,19 @@ def collate_fn(batch):
 
         radar_points[i, :n] = points
         radar_padding_mask[i, :n] = False
+        radar_relevance_targets[i, :n] = batch[i][
+            "radar_relevance_targets"
+        ]
+        radar_relevance_ignore_mask[i, :n] = batch[i][
+            "radar_relevance_ignore_mask"
+        ]
 
     return {
         "images": images,
         "radar_points": radar_points,
         "radar_padding_mask": radar_padding_mask,
+        "radar_relevance_targets": radar_relevance_targets,
+        "radar_relevance_ignore_mask": radar_relevance_ignore_mask,
         "targets": [item["target"] for item in batch],
         "metadata": [item["metadata"] for item in batch],
     }

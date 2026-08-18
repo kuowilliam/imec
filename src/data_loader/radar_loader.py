@@ -11,7 +11,7 @@ or ignore if it sits in the 10% box margin.
 """
 
 import numpy as np
-from pathlib import Path
+from nuscenes.eval.detection.utils import category_to_detection_name
 from nuscenes.utils.data_classes import RadarPointCloud
 from nuscenes.utils.geometry_utils import view_points
 from nuscenes.utils.geometry_utils import points_in_box
@@ -23,15 +23,27 @@ def load_projected_radar(
     camera_channel="CAM_FRONT",
     nsweeps=5, # default 5 sweeps
     min_distance=1.0,
+    class_name="pedestrian",
+    ignore_margin=0.10,
 ):
+    """
+    Load radar points and project them to the image.
+
+    return relavance by using bbox from the annotation.
+    """
     camera_token = sample["data"][camera_channel]
     camera_record = nusc.get("sample_data", camera_token) #get camera record
+
+    # get the pedestrian bboxes from the camera frame.
+    _, camera_boxes, _ = nusc.get_sample_data(camera_token)
+    pedestrian_boxes = [box for box in camera_boxes if category_to_detection_name(box.name) == class_name]
 
     # get camera intrinsics for projection
     calibration = nusc.get( "calibrated_sensor", camera_record["calibrated_sensor_token"],)
     camera_intrinsic = np.asarray(calibration["camera_intrinsic"], dtype=np.float32)
     
     all_points = []
+    all_camera_xyz = [] # save all coordinates of the 3D camera points.
     for radar_channel in radar_channels:
         radar, time_lags = RadarPointCloud.from_file_multisweep(
             nusc=nusc,
@@ -76,11 +88,40 @@ def load_projected_radar(
         )
 
         all_points.append(features)
+        all_camera_xyz.append(
+            points[:3, valid].T.astype(np.float32)
+        )
 
     if not all_points:
-        return np.empty((0, 7), dtype=np.float32)
+        return (
+            np.empty((0, 7), dtype=np.float32),
+            np.empty((0,), dtype=np.float32),
+            np.empty((0,), dtype=bool),
+        )
 
-    return np.concatenate(all_points, axis=0).astype(np.float32)
+    radar_features = np.concatenate(
+        all_points,
+        axis=0,
+    ).astype(np.float32)
+
+    camera_xyz = np.concatenate(
+        all_camera_xyz,
+        axis=0,
+    ).astype(np.float32)
+
+    relevance_targets, relevance_ignore_mask = (
+        build_radar_relevance_targets(
+            camera_xyz=camera_xyz,
+            pedestrian_boxes=pedestrian_boxes,
+            ignore_margin=ignore_margin,
+        )
+    )
+
+    return (
+        radar_features,
+        relevance_targets,
+        relevance_ignore_mask,
+    )
 
 def build_radar_relevance_targets(
     camera_xyz,
