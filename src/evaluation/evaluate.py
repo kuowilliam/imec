@@ -16,7 +16,7 @@ from src.data_loader.nuscenes_front_loader import (
 )
 from src.evaluation.metrics import PedestrianDetectionMetrics
 from src.evaluation.visualization import save_detection_visualization
-from src.model.detector import CameraRadarDetector
+from src.model.detector_v2 import CameraRadarDetector
 from src.model.postprocess import CenterNetPostProcessor
 from src.utils import resolve_path, select_device
 
@@ -26,6 +26,8 @@ def run_evaluation(config=None):
         config = load_config()
 
     evaluation_config = config["evaluation"]
+    model_config = config["model"]
+    fusion_config = model_config["fusion"]
     device = select_device(evaluation_config["device"])
     checkpoint_path = resolve_path(evaluation_config["checkpoint"])
     output_directory = resolve_path(evaluation_config["output_dir"])
@@ -73,6 +75,14 @@ def run_evaluation(config=None):
 
     model = CameraRadarDetector(
         image_size=config["image_size"],
+        window_size=fusion_config["window_size"],
+        vertical_neighbor_windows=fusion_config[
+            "vertical_neighbor_windows"
+        ],
+        window_batch_bucket_size=fusion_config[
+            "window_batch_bucket_size"
+        ],
+        dropout=fusion_config["dropout"],
         freeze_camera=True,
     )
     checkpoint = torch.load(
@@ -80,7 +90,10 @@ def run_evaluation(config=None):
         map_location="cpu",
         weights_only=False,
     )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(
+        checkpoint["model_state_dict"],
+        strict=True,
+    )
     model = model.to(device)
     model.eval()
 
