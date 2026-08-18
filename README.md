@@ -26,29 +26,6 @@ camera–Radar fusion at multiple feature resolutions.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    I["Front camera image"] --> C["Frozen DINOv3 ConvNeXt-Tiny"]
-    C --> C4["Camera s4"]
-    C --> C8["Camera s8"]
-    C --> C16["Camera s16"]
-
-    R["Projected Radar points"] --> E["Point feature and position MLPs"]
-    E --> T["Radar tokens"]
-    E --> Q["Point relevance logits"]
-
-    C4 --> F["Multi-scale local window cross-attention"]
-    C8 --> F
-    C16 --> F
-    T --> F
-    Q --> F
-
-    F --> D["Top-down multi-scale decoder"]
-    D --> H["Center heatmap"]
-    D --> S["Box width and height"]
-    D --> O["Center offset"]
-```
-
 Each Radar point is represented by seven values:
 
 ```text
@@ -185,48 +162,6 @@ Metrics and images are written under the configured `evaluation.output_dir`.
 The low postprocessing threshold is intentional: confidence candidates are
 retained for AP ranking, while the separate report threshold defines the
 precision/recall operating point.
-
-## Repository structure
-
-```text
-.
-├── README.md
-├── pyproject.toml
-├── uv.lock
-├── docs/
-│   └── superpowers/              # V2 architecture design and implementation plan
-└── src/
-    ├── augmentation/             # Synchronized camera/Radar augmentation
-    ├── config/
-    │   ├── config.yaml           # Dataset, model, training, and evaluation settings
-    │   └── splits/               # Fixed scene-level manifests
-    ├── data_loader/
-    │   ├── nuscenes_front_loader.py
-    │   ├── radar_loader.py       # Projection and point relevance targets
-    │   └── rasterization.py      # Earlier raster representation experiments
-    ├── evaluation/
-    │   ├── evaluate.py
-    │   ├── metrics.py
-    │   └── visualization.py
-    ├── model/
-    │   ├── camera_encoder.py
-    │   ├── radar_encoder.py
-    │   ├── detector.py           # V1 detector
-    │   ├── fusion.py             # V1 global fusion
-    │   ├── decoder.py            # V1 decoder
-    │   ├── loss.py               # V1 CenterNet loss
-    │   ├── detector_v2.py        # V2 detector
-    │   ├── point_window_fusion.py
-    │   ├── decoder_v2.py
-    │   ├── loss_v2.py
-    │   └── postprocess.py
-    ├── notebooks/
-    │   └── eda.ipynb
-    ├── training/
-    │   ├── train.py              # V1 training entry point
-    │   └── train_v2.py           # V2 training entry point
-    └── utils/
-```
 
 ## Scope and limitations
 
