@@ -1,7 +1,7 @@
 [project]
 name = "imec"
 version = "0.1.0"
-description = "Add your description here"
+description = "imec physical AI assignment"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
