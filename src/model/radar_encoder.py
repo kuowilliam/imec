@@ -13,10 +13,10 @@ class RadarPointEncoder(nn.Module):
             True = padding
 
     Output:
-        tokens: [B, N, token_dim]
-        padding_mask: [B, N]
-        positions: [B, N, 2]  normalized (u, v)
-        relevance_logits: [B, N]
+        tokens: [B, N + 1, token_dim]
+        padding_mask: [B, N + 1]
+
+    The additional token (+1) is a learned null Radar token.
     """
 
     def __init__(self, image_size=(640, 360), token_dim=256,):
@@ -47,11 +47,9 @@ class RadarPointEncoder(nn.Module):
         )
 
         self.output_norm = nn.LayerNorm(token_dim)
-        self.relevance_head = nn.Sequential(
-            nn.Linear(token_dim, 64),
-            nn.GELU(),
-            nn.Linear(64, 1),
-        )
+
+        # This represents no useful radar information.
+        self.null_token = nn.Parameter(torch.zeros(1, 1, token_dim))
 
     def _normalize_points(self, radar_points):
         u = radar_points[..., 0]
@@ -98,23 +96,24 @@ class RadarPointEncoder(nn.Module):
             radar_padding_mask.unsqueeze(-1),
             0.0,
         )
-        # keep the position for after using local attention.
-        positions = positions.masked_fill(
-            radar_padding_mask.unsqueeze(-1),
-            0.0,
+
+        batch_size = radar_points.shape[0]
+
+        null_tokens = self.null_token.expand(batch_size, -1, -1)
+
+        # Null token is always valid.
+        null_mask = torch.zeros(
+            batch_size,
+            1,
+            dtype=torch.bool,
+            device=radar_padding_mask.device,
         )
 
-        relevance_logits = self.relevance_head(
-            radar_tokens
-        ).squeeze(-1)
-        relevance_logits = relevance_logits.masked_fill(
-            radar_padding_mask,
-            0.0,
-        )
+        # combine null tokens and radar tokens, also add to padding mask
+        tokens = torch.cat([null_tokens, radar_tokens], dim=1)
+        padding_mask = torch.cat([null_mask, radar_padding_mask], dim=1)
 
         return {
-            "tokens": radar_tokens,
-            "positions": positions,
-            "padding_mask": radar_padding_mask,
-            "relevance_logits": relevance_logits,
+            "tokens": tokens,
+            "padding_mask": padding_mask,
         }

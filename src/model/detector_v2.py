@@ -5,7 +5,7 @@ from src.model.decoder_v2 import PedestrianDetectionDecoder
 from src.model.point_window_fusion import (
     MultiScaleCameraRadarFusion,
 )
-from src.model.radar_encoder import RadarPointEncoder
+from src.model.radar_encoder_v2 import RadarPointEncoder
 
 
 class CameraRadarDetector(nn.Module):
