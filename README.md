@@ -1,12 +1,14 @@
-# Camera–Radar Pedestrian Detection with Cross-Attention
+# Multimodal Pedestrian Detection with Cross-Attention
 
-Front-view 2D pedestrian detection on [nuScenes](https://www.nuscenes.org/nuscenes),
-using `CAM_FRONT` and projected `RADAR_FRONT` points.
+This work studies front-view 2D pedestrian detection on
+[nuScenes](https://www.nuscenes.org/nuscenes), using `CAM_FRONT` and
+projected `RADAR_FRONT` points.
 
-A frozen DINOv3 ConvNeXt-Tiny encodes the image. Radar points become tokens,
-and camera features fuse with them through cross-attention: each camera cell
-queries the Radar returns that should update it. A CenterNet head then
-predicts a center heatmap, box size, and sub-cell offset.
+The model employed in this repository studies multimodal pedestrian
+detection on camera and Radar. It compares different cross-attention
+techniques. Both models use a frozen DINOv3 ConvNeXt-Tiny camera encoder
+and an MLP that encodes each Radar point into a token. A CenterNet
+decoder then predicts a center heatmap, box size, and sub-cell offset.
 
 ![nuScenes autonomous driving dataset](assets/nuscenes.webp)
 
