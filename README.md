@@ -8,6 +8,8 @@ and camera features fuse with them through cross-attention: each camera cell
 queries the Radar returns that should update it. A CenterNet head then
 predicts a center heatmap, box size, and sub-cell offset.
 
+![CAM_FRONT pedestrian detections on nuScenes](assets/cam-front-pedestrian-detections.jpg)
+
 ## Models
 
 **Camera encoder.** Frozen DINOv3 ConvNeXt-Tiny. Feature maps: s4, s8, s16.
