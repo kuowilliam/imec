@@ -12,6 +12,8 @@ decoder then predicts a center heatmap, box size, and sub-cell offset.
 
 ![nuScenes autonomous driving dataset](assets/nuscenes.webp)
 
+Image from [nuScenes](https://www.nuscenes.org/).
+
 ## Models
 
 **Camera encoder.** Frozen DINOv3 ConvNeXt-Tiny. Feature maps: s4, s8, s16.
