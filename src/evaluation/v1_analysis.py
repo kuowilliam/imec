@@ -10,106 +10,21 @@ from src.data_loader.nuscenes_front_loader import (
     collate_fn,
     load_scene_names,
 )
-from src.evaluation.metrics import PedestrianDetectionMetrics
+from src.evaluation.utils import (
+    RADAR_MODES,
+    apply_radar_mode,
+    build_detection_metrics,
+    load_detailed_results,
+    resolve_device,
+    synchronize_device,
+)
 from src.evaluation.visualization import (
     QualitativeGalleryCollector,
     generate_detection_gallery,
 )
 from src.model.detector import CameraRadarDetector
 from src.model.postprocess import CenterNetPostProcessor
-from src.utils import resolve_path, select_device
-
-
-RADAR_MODES = ("normal", "masked", "shuffled")
-
-
-def load_detailed_results(*paths):
-    """Load the first cached result containing every V1 Radar mode."""
-    for path in paths:
-        path = Path(path)
-        if not path.exists():
-            continue
-
-        with path.open() as file:
-            candidate = json.load(file)
-
-        if set(candidate.get("modes", {})) >= set(RADAR_MODES):
-            return candidate, path
-
-    raise FileNotFoundError(
-        "No detailed V1 normal/masked/shuffled result was found. "
-        "Run run_v1_detailed_evaluation() first."
-    )
-
-
-def apply_radar_mode(
-    radar_points,
-    radar_padding_mask,
-    mode,
-    seed=42,
-):
-    """Create one Radar inference ablation without changing the batch."""
-    if mode not in RADAR_MODES:
-        raise ValueError(f"Unknown Radar mode: {mode}")
-
-    points = radar_points.clone()
-    padding_mask = radar_padding_mask.clone()
-
-    if mode == "normal":
-        return points, padding_mask
-
-    if mode == "masked":
-        padding_mask.fill_(True)
-        return points, padding_mask
-
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(seed)
-
-    for batch_index in range(points.shape[0]):
-        valid_indices = torch.where(
-            ~padding_mask[batch_index]
-        )[0]
-        count = valid_indices.numel()
-        if count < 2:
-            continue
-
-        order = torch.randperm(count, generator=generator)
-        if torch.equal(order, torch.arange(count)):
-            order = torch.roll(order, shifts=1)
-
-        shuffled_indices = valid_indices[order]
-        points[batch_index, valid_indices, :2] = points[
-            batch_index,
-            shuffled_indices,
-            :2,
-        ]
-
-    return points, padding_mask
-
-
-def _build_detection_metrics(evaluation_config):
-    return PedestrianDetectionMetrics(
-        iou_thresholds=evaluation_config["iou_thresholds"],
-        report_iou_threshold=evaluation_config[
-            "report_iou_threshold"
-        ],
-        report_score_threshold=evaluation_config[
-            "report_score_threshold"
-        ],
-    )
-
-
-def _synchronize_device(device):
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
-    elif device.type == "mps" and hasattr(torch, "mps"):
-        torch.mps.synchronize()
-
-
-def _resolve_device(device, evaluation_config):
-    if device is None or device == "auto":
-        return select_device(evaluation_config["device"])
-    return torch.device(device)
+from src.utils import resolve_path
 
 
 def _build_runtime(
@@ -194,7 +109,10 @@ def _run_evaluation_mode(
     max_visualizations,
     progress_interval,
 ):
-    metrics = _build_detection_metrics(evaluation_config)
+    """
+    Run normal, masked, shuffled evaluation
+    """
+    metrics = build_detection_metrics(evaluation_config)
     elapsed_seconds = 0.0
     valid_pairs = 0
     null_mass_sum = 0.0
@@ -222,7 +140,7 @@ def _run_evaluation_mode(
             seed=42 + batch_index,
         )
 
-        _synchronize_device(device)
+        synchronize_device(device)
         started_at = time.perf_counter()
         predictions = model(
             images=batch["images"].to(device),
@@ -231,7 +149,7 @@ def _run_evaluation_mode(
             return_attention=True,
         )
         detections = postprocessor(predictions)
-        _synchronize_device(device)
+        synchronize_device(device)
         elapsed_seconds += time.perf_counter() - started_at
         metrics.update(detections, batch["targets"])
 
@@ -316,7 +234,7 @@ def generate_v1_qualitative_gallery(
 ):
     """Generate only the V1 normal-mode qualitative gallery."""
     evaluation_config = config["evaluation"]
-    device = _resolve_device(device, evaluation_config)
+    device = resolve_device(device, evaluation_config)
     checkpoint = torch.load(
         resolve_path(checkpoint_path),
         map_location="cpu",
@@ -356,7 +274,7 @@ def run_v1_detailed_evaluation(
 ):
     """Run normal/masked/shuffled V1 evaluation and save JSON."""
     evaluation_config = config["evaluation"]
-    device = _resolve_device(device, evaluation_config)
+    device = resolve_device(device, evaluation_config)
     checkpoint_path = resolve_path(checkpoint_path)
     output_directory = resolve_path(output_directory)
 

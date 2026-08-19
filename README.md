@@ -34,6 +34,29 @@ keys and values.
 | Decoder | Fused s16, camera s8/s4 | Fused s4, s8, s16 |
 | Loss | CenterNet | CenterNet + Radar relevance |
 
+## Source files
+
+Shared: [`camera_encoder.py`](src/model/camera_encoder.py),
+[`postprocess.py`](src/model/postprocess.py).
+
+| | V1 | V2 |
+| --- | --- | --- |
+| Detector | [`detector.py`](src/model/detector.py) | [`detector_v2.py`](src/model/detector_v2.py) |
+| Radar encoder | [`radar_encoder.py`](src/model/radar_encoder.py) (`null_token`) | [`radar_encoder_v2.py`](src/model/radar_encoder_v2.py) (relevance head) |
+| Fusion | [`fusion.py`](src/model/fusion.py) | [`point_window_fusion.py`](src/model/point_window_fusion.py) |
+| Decoder | [`decoder.py`](src/model/decoder.py) | [`decoder_v2.py`](src/model/decoder_v2.py) |
+| Loss | [`loss.py`](src/model/loss.py) | [`loss_v2.py`](src/model/loss_v2.py) |
+| Train | [`train.py`](src/training/train.py) | [`train_v2.py`](src/training/train_v2.py) |
+
+## Notebooks
+
+| Notebook | Contents |
+| --- | --- |
+| [`src/notebooks/eda.ipynb`](src/notebooks/eda.ipynb) | Dataset EDA: annotations, `CAM_FRONT`, projected Radar |
+| [`src/notebooks/v1.0_trainval_parts1_2.ipynb`](src/notebooks/v1.0_trainval_parts1_2.ipynb) | Audit of the part 1+2 blob: available scenes, split, experimental protocol |
+| [`src/notebooks/evaluation_v1.ipynb`](src/notebooks/evaluation_v1.ipynb) | Full V1 evaluation: metrics, Radar ablation, qualitative predictions |
+| [`src/notebooks/evaluation_v2.ipynb`](src/notebooks/evaluation_v2.ipynb) | Full V2 evaluation: metrics, Radar ablation, relevance, window fusion |
+
 ## Dataset
 
 Use nuScenes `v1.0-trainval` metadata plus the part 1 and part 2 file blobs

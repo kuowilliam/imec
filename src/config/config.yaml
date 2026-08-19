@@ -2,17 +2,17 @@ image_size: [640, 360]  # [width, height]
 camera_channel: CAM_FRONT
 class_name: pedestrian
 
+radar:
+  channels:
+    - RADAR_FRONT
+  nsweeps: 5
+
 dataset:
   version: v1.0-trainval
   available_scenes_only: true
   scene_manifests:
     train: src/config/splits/train_scenes.txt
     val: src/config/splits/val_scenes.txt
-
-radar:
-  channels:
-    - RADAR_FRONT
-  nsweeps: 5
 
 model:
   fusion:

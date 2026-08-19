@@ -3,6 +3,7 @@ import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 from PIL import ImageDraw
 from torchvision.transforms import functional as F
@@ -18,10 +19,8 @@ def _resolve_path(path):
     return PROJECT_ROOT / path
 
 
-def plot_learning_curves(history, output_path=None):
-    """
-    Plot train/val loss and val detection metrics from train.py history.
-    """
+def history_to_frame(history):
+    """Flatten train.py / train_v2.py JSON history into one row per epoch."""
     if not isinstance(history, dict):
         history_path = _resolve_path(history)
         with history_path.open() as file:
@@ -31,48 +30,88 @@ def plot_learning_curves(history, output_path=None):
     if not records:
         raise ValueError("Training history has no epochs to plot.")
 
-    epochs = [record["epoch"] for record in records]
-    train_loss = [record["train"]["total_loss"] for record in records]
-    val_loss = [record["val"]["total_loss"] for record in records]
-    val_ap50 = [record["val"]["ap50"] for record in records]
-    val_ap75 = [record["val"]["ap75"] for record in records]
-    val_map = [record["val"]["map_50_95"] for record in records]
+    rows = []
+    for record in records:
+        row = {
+            "epoch": record["epoch"],
+            "is_best": record.get("is_best", False),
+        }
+        for split in ("train", "val"):
+            values = record.get(split)
+            if values is not None:
+                row.update(
+                    {
+                        f"{split}_{name}": value
+                        for name, value in values.items()
+                    }
+                )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def plot_training_curves(
+    history,
+    loss_title="Training and validation loss",
+    figsize=(14, 4.5),
+    output_path=None,
+):
+    """Plot train/val loss and validation AP from a history dict or JSON path."""
+    if not isinstance(history, dict):
+        history_path = _resolve_path(history)
+        with history_path.open() as file:
+            history = json.load(file)
+
+    history_frame = history_to_frame(history)
     best_epoch = history.get("best_epoch")
-    best_val_map = history.get("best_val_map_50_95")
 
-    figure, axes = plt.subplots(1, 2, figsize=(12.0, 4.5))
-
-    axes[0].plot(epochs, train_loss, label="Train loss")
-    axes[0].plot(epochs, val_loss, label="Val loss")
-    axes[0].set_title("Train vs Val Loss")
-    axes[0].set_xlabel("Epoch")
-    axes[0].set_ylabel("Loss")
-
-    axes[1].plot(epochs, val_ap50, label="AP50")
-    axes[1].plot(epochs, val_ap75, label="AP75")
-    axes[1].plot(epochs, val_map, label="mAP50:95")
-    axes[1].set_title("Validation Detection Metrics")
-    axes[1].set_xlabel("Epoch")
-    axes[1].set_ylabel("Average Precision")
-    axes[1].set_ylim(0.0, 1.0)
-
+    figure, axes = plt.subplots(1, 2, figsize=figsize)
+    axes[0].plot(
+        history_frame["epoch"],
+        history_frame["train_total_loss"],
+        label="Train total loss",
+    )
+    axes[0].plot(
+        history_frame["epoch"],
+        history_frame["val_total_loss"],
+        marker="o",
+        label="Validation total loss",
+    )
     if best_epoch is not None:
-        best_label = f"Best epoch {best_epoch}"
-        if best_val_map is not None:
-            best_label += f" (mAP {best_val_map:.4f})"
-        for axis in axes:
-            axis.axvline(
-                best_epoch,
-                color="black",
-                linestyle="--",
-                linewidth=1.0,
-                label=best_label,
-            )
+        axes[0].axvline(
+            best_epoch,
+            color="black",
+            linestyle="--",
+            alpha=0.7,
+            label=f"Best epoch {best_epoch}",
+        )
+    axes[0].set(title=loss_title, xlabel="Epoch", ylabel="Loss")
+    axes[0].legend()
 
-    for axis in axes:
-        axis.legend()
-        axis.grid(True, alpha=0.3)
-
+    for column, label in (
+        ("val_ap50", "AP50"),
+        ("val_ap75", "AP75"),
+        ("val_map_50_95", "mAP50:95"),
+    ):
+        axes[1].plot(
+            history_frame["epoch"],
+            history_frame[column],
+            marker="o",
+            label=label,
+        )
+    if best_epoch is not None:
+        axes[1].axvline(
+            best_epoch,
+            color="black",
+            linestyle="--",
+            alpha=0.7,
+        )
+    axes[1].set(
+        title="Validation detection metrics",
+        xlabel="Epoch",
+        ylabel="Score",
+        ylim=(0, None),
+    )
+    axes[1].legend()
     figure.tight_layout()
 
     if output_path is not None:
