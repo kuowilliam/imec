@@ -54,6 +54,10 @@ class RadarPointEncoder(nn.Module):
         )
 
     def _normalize_points(self, radar_points):
+        """
+        u,v normalized to -1, 1
+        depth, rcs, vx, vy, time_lag normalized to 0, 1
+        """
         u = radar_points[..., 0]
         v = radar_points[..., 1]
         depth = radar_points[..., 2]
@@ -62,10 +66,11 @@ class RadarPointEncoder(nn.Module):
         vy = radar_points[..., 5]
         time_lag = radar_points[..., 6]
 
-        # normalize image positions to -1, 1
+        # normalize u,v to -1, 1
         u = 2.0 * u / max(self.image_width - 1, 1) - 1.0
         v = 2.0 * v / max(self.image_height - 1, 1) - 1.0
 
+        # clamp physical features and normalize to 0, 1
         # same physical ranges used during the earlier EDA/raster work.
         depth = depth.clamp(0.0, 250.0) / 250.0
         rcs = (rcs.clamp(-10.0, 50.0) + 10.0) / 60.0
@@ -98,19 +103,13 @@ class RadarPointEncoder(nn.Module):
             radar_padding_mask.unsqueeze(-1),
             0.0,
         )
-        # keep the position for after using local attention.
         positions = positions.masked_fill(
             radar_padding_mask.unsqueeze(-1),
             0.0,
         )
 
-        relevance_logits = self.relevance_head(
-            radar_tokens
-        ).squeeze(-1)
-        relevance_logits = relevance_logits.masked_fill(
-            radar_padding_mask,
-            0.0,
-        )
+        relevance_logits = self.relevance_head(radar_tokens).squeeze(-1)
+        relevance_logits = relevance_logits.masked_fill(radar_padding_mask, 0.0)
 
         return {
             "tokens": radar_tokens,

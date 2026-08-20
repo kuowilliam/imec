@@ -22,16 +22,16 @@ class PointWindowCrossAttention(nn.Module):
     ):
         super().__init__()
 
+        # fusion_dim must be divisible by num_heads
         if fusion_dim % num_heads != 0:
-            raise ValueError(
-                "fusion_dim must be divisible by num_heads."
-            )
+            raise ValueError("fusion_dim must be divisible by num_heads")
 
         self.fusion_dim = fusion_dim
         self.window_size = window_size
         self.vertical_neighbor_windows = vertical_neighbor_windows
         self.window_batch_bucket_size = window_batch_bucket_size
 
+        # convert dimension
         self.camera_projection = (
             nn.Identity()
             if camera_channels == fusion_dim
@@ -42,6 +42,7 @@ class PointWindowCrossAttention(nn.Module):
             )
         )
 
+        # convert dimension
         self.radar_projection = nn.Linear(
             radar_token_dim,
             fusion_dim,
@@ -142,13 +143,21 @@ class PointWindowCrossAttention(nn.Module):
         )
 
     def _partition_windows(self, features):
-        """Partition a feature map into non-overlapping local windows."""
+        """
+        partition a feature map into non-overlapping local windows.
+
+        - input a camera feature
+        - output a list of windows and the padded height and width
+
+        """
         batch_size, channels, height, width = features.shape
         window_size = self.window_size
 
+        # window number
         window_rows = math.ceil(height / window_size)
         window_columns = math.ceil(width / window_size)
 
+        # calculate the number of padding
         padded_height = window_rows * window_size
         padded_width = window_columns * window_size
 
@@ -236,7 +245,8 @@ class PointWindowCrossAttention(nn.Module):
     ):
         batch_size, _, height, width = camera_feature.shape
 
-        camera_base = self.camera_projection(camera_feature)
+        camera_base = self.camera_projection(camera_feature) # project to fusion_dim
+        
         # partition the camera feature map into windows
         camera_windows, window_rows, window_columns, padded_height, padded_width = self._partition_windows(camera_base)
 
@@ -260,10 +270,9 @@ class PointWindowCrossAttention(nn.Module):
         position_windows, _, _, _, _ = (
             self._partition_windows(position_map)
         )
-        position_windows = position_windows[:, :, :2]
+        position_windows = position_windows[:, :, :2] # a position window to know the position of the point in the window
 
-        # project the radar tokens to the fusion dimension
-        radar_tokens = self.radar_projection(radar_tokens)
+        radar_tokens = self.radar_projection(radar_tokens) # project to fusion_dim
 
         occupied_indices = []
         local_token_lists = []
@@ -374,7 +383,7 @@ class PointWindowCrossAttention(nn.Module):
             "attention_point_capacity": 0,
         }
 
-        if not occupied_indices:
+        if not occupied_indices: # if no any occupied windows, return the original camera feature
             return {
                 "feature_map": camera_base,
                 "diagnostics": diagnostics,
@@ -426,7 +435,7 @@ class PointWindowCrossAttention(nn.Module):
         attention_camera[:number_of_occupied] = occupied_camera # copy the occupied camera windows to the attention camera
         attention_positions[:number_of_occupied] = occupied_positions # copy the occupied positions to the attention positions
 
-        # build the camera queries
+        # build the camera queries: camera feature + position
         camera_queries = self.camera_query_norm(
             attention_camera
             + self.camera_position_mlp(
@@ -470,21 +479,22 @@ class PointWindowCrossAttention(nn.Module):
             ] = False
 
         radar_keys = self.radar_norm(radar_keys)
+
         # time the relevance to get the radar values
         radar_values = radar_keys * torch.sigmoid(relevance).unsqueeze(-1)
 
         # build the radar keys and values, perform the cross-attention
         radar_update, attention_weights = (
             self.cross_attention(
-                query=camera_queries,
-                key=radar_keys,
-                value=radar_values,
+                query=camera_queries, # 25 camera windows + position
+                key=radar_keys, # radar tokens of this window
+                value=radar_values, # token x sigmoid(relevance)
                 key_padding_mask=local_padding_mask,
                 need_weights=return_attention,
                 average_attn_weights=False,
             )
         )
-        # camera_attention + radar_update + ffn
+        # use original camera feature + radar_update
         fused = attention_camera + self.attention_dropout(radar_update)
         fused = fused + self.ffn(self.ffn_norm(fused))
 

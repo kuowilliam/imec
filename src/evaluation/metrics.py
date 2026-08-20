@@ -9,7 +9,7 @@ class PedestrianDetectionMetrics:
     def __init__(
         self,
         iou_thresholds=None,
-        report_iou_threshold=0.5,
+        report_iou_threshold=0.5, # for matching predictions and targets
         report_score_threshold=0.1,
     ):
         if iou_thresholds is None:
@@ -149,6 +149,7 @@ class PedestrianDetectionMetrics:
         report_keep = scores >= self.report_score_threshold
         true_positive_count = int(true_positives[report_keep].sum())
         prediction_count = int(report_keep.sum())
+        
         false_positive_count = prediction_count - true_positive_count
         false_negative_count = max(
             0,

@@ -17,7 +17,7 @@ dataset:
 model:
   fusion:
     scales: [s4, s8, s16]
-    window_size: 5
+    window_size: 5 # n x n window size
     vertical_neighbor_windows: 1
     window_batch_bucket_size: 32
     dropout: 0.1
@@ -43,7 +43,7 @@ train:
   val_split: val
   frame_stride: 2
   validation_interval: 2
-  progress_interval: 25
+  progress_interval: 25 # print the loss every 25 batches
   epochs: 100
   batch_size: 2
   num_samples: null
@@ -66,7 +66,7 @@ evaluation:
   score_threshold: 0.001
   visualization_score_threshold: 0.1
   top_k: 100
-  report_iou_threshold: 0.5
+  report_iou_threshold: 0.5 # for matching predictions and targets
   report_score_threshold: 0.1
   iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
   save_visualizations: true

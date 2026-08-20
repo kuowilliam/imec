@@ -248,6 +248,7 @@ class CenterNetLoss(nn.Module):
         offset_prediction = predictions["offset"]
 
         output_size = heatmap_logits.shape[-2:]
+        # GT convert to training targets
         dense_targets = self.build_targets(
             targets=targets,
             output_size=output_size,

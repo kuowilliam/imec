@@ -223,6 +223,7 @@ def main():
     random.seed(42)
     torch.manual_seed(42)
 
+    # load config
     config = load_config()
     train_cfg = config["train"]
     evaluation_cfg = config["evaluation"]

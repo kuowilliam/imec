@@ -26,6 +26,7 @@ class CameraEncoder(nn.Module):
         )
         self.frozen = freeze
 
+        # input normalization for this pretrained model
         data_cfg = timm.data.resolve_model_data_config(self.backbone)
         self.register_buffer(
             "image_mean",

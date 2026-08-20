@@ -20,7 +20,7 @@ class CenterNetLoss(CenterNetDetectionLoss):
         heatmap_beta=4.0,
         box_size_weight=0.1,
         offset_weight=1.0,
-        radar_relevance_weight=0.1,
+        radar_relevance_weight=0.1, # add a weight for radar relevance loss
     ):
         super().__init__(
             image_size=image_size,
@@ -95,7 +95,7 @@ class CenterNetLoss(CenterNetDetectionLoss):
         )
 
         radar_relevance_loss = (
-            self._balanced_radar_relevance_loss(
+            self._balanced_radar_relevance_loss( # prevent excessive 0 points dominate the loss
                 logits=predictions[
                     "radar_relevance_logits"
                 ],

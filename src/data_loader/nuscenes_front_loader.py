@@ -72,12 +72,11 @@ class NuScenesFrontLoader(Dataset):
             verbose=False,
         )
 
-        # Use an explicit scene-level split when provided. Otherwise, fall
-        # back to the official nuScenes split.
+        # Use an explicit scene-level split when provided. Otherwise
         split_scenes = (
             set(scene_names)
             if scene_names is not None
-            else set(create_splits_scenes()[split])
+            else set(create_splits_scenes()[split]) # fall back to the official nuScenes split.
         )
         self.scene_name_by_token = { # map scene token to scene name
             scene["token"]: scene["name"]
@@ -90,7 +89,7 @@ class NuScenesFrontLoader(Dataset):
             if self.scene_name_by_token[sample["scene_token"]] in split_scenes
         ]
 
-        if self.available_scenes_only:
+        if self.available_scenes_only: # because only use p1, p2 parts
             samples_by_scene = {}
             for sample in split_samples:
                 samples_by_scene.setdefault(sample["scene_token"], []).append(sample)
@@ -115,7 +114,7 @@ class NuScenesFrontLoader(Dataset):
                     f"and radar files were found under {self.dataroot}."
                 )
 
-        if self.frame_stride > 1:
+        if self.frame_stride > 1: # skip some frames to save time
             samples_by_scene = {}
             for sample in split_samples:
                 samples_by_scene.setdefault(sample["scene_token"], []).append(sample)
@@ -259,9 +258,9 @@ class NuScenesFrontLoader(Dataset):
         target_w, target_h = self.image_size
 
         scale_x = target_w / original_w
-        scale_y = target_h / original_h
+        scale_y = target_h / original_h # resize the image
 
-        # Pedestrian boxes
+        # only use the pedestrian boxes
         boxes = self._get_pedestrian_boxes(
             sample,
             (original_w, original_h),
@@ -323,30 +322,11 @@ def collate_fn(batch):
     feature_dim = radar_list[0].shape[-1]
 
     # create a tensor to store the radar points
-    radar_points = torch.zeros(
-        batch_size,
-        max_points,
-        feature_dim,
-        dtype=torch.float32,
-    )
+    radar_points = torch.zeros(batch_size, max_points, feature_dim, dtype=torch.float32)
+    radar_padding_mask = torch.ones(batch_size, max_points, dtype=torch.bool)
 
-    radar_padding_mask = torch.ones(
-        batch_size,
-        max_points,
-        dtype=torch.bool,
-    )
-
-    radar_relevance_targets = torch.zeros(
-        batch_size,
-        max_points,
-        dtype=torch.float32,
-    )
-
-    radar_relevance_ignore_mask = torch.ones(
-        batch_size,
-        max_points,
-        dtype=torch.bool,
-    )
+    radar_relevance_targets = torch.zeros(batch_size, max_points, dtype=torch.float32)
+    radar_relevance_ignore_mask = torch.ones(batch_size, max_points, dtype=torch.bool)
 
     for i, points in enumerate(radar_list):
         n = points.shape[0]

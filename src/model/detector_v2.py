@@ -86,7 +86,7 @@ class CameraRadarDetector(nn.Module):
         return_diagnostics=False,
         return_attention=False,
     ):
-        camera_features = self.camera_encoder(images)
+        camera_features = self.camera_encoder(images) # dict of camera features at s4, s8, s16, s32
 
         radar_output = self.radar_encoder(
             radar_points,
